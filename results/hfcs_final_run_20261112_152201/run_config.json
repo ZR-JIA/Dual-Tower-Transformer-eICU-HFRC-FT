@@ -1,0 +1,22 @@
+{
+  "packs": "/home/lab/hfcs/preprocessing/eICU/train_ready_hfcs/PACKS/patient_stratified",
+  "external": "/home/lab/hfcs/preprocessing/MIMIC/data/hfcs/external",
+  "out": "/home/lab/hfcs/outputs/final",
+  "models": [
+    "dualtower_ft",
+    "dualtower",
+    "xgboost",
+    "random_forest",
+    "logistic_regression"
+  ],
+  "splits": [
+    "seed_42",
+    "seed_5191",
+    "seed_5390",
+    "seed_7270",
+    "seed_860"
+  ],
+  "device": "cuda",
+  "torch": "2.5.1",
+  "cuda_device": "NVIDIA GeForce RTX 4060 Laptop GPU"
+}
