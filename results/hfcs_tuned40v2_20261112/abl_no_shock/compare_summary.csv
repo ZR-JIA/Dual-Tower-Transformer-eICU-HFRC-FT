@@ -1,0 +1,7 @@
+set,model,auroc_full,auroc_variant,sd_variant,mean_diff,significant,splits
+external,dualtower_ft,0.6679,0.67,0.0171,0.0022,2,5
+external,logistic_regression,0.6948,0.6964,0.0092,0.0016,0,5
+external,xgboost,0.6853,0.6886,0.013,0.0034,0,5
+test,dualtower_ft,0.6606,0.6268,0.0628,-0.0338,1,5
+test,logistic_regression,0.6449,0.6325,0.065,-0.0125,1,5
+test,xgboost,0.6474,0.6304,0.0515,-0.017,0,5

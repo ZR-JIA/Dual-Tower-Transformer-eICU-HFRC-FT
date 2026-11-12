@@ -1,0 +1,17 @@
+{
+  "packs": "/home/lab/hfcs/preprocessing/eICU/train_ready_hfcs/PACKS/patient_stratified",
+  "external": "/home/lab/hfcs/preprocessing/MIMIC/data/hfcs/external",
+  "out": "/home/lab/hfcs/outputs/hfcs_tuned",
+  "run_name": "abl_no_safeguard",
+  "models": [
+    "dualtower_ft"
+  ],
+  "splits": "seed_5191",
+  "trials": 40,
+  "device": "cuda",
+  "variant": "no_safeguard",
+  "summarise": null,
+  "compare": null,
+  "torch": "2.5.1",
+  "optuna": "4.6.0"
+}

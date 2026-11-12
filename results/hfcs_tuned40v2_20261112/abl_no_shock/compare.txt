@@ -1,0 +1,8 @@
+                              auroc_full  auroc_variant  sd_variant  mean_diff  significant  splits
+set      model                                                                                     
+external dualtower_ft             0.6679         0.6700      0.0171     0.0022            2       5
+         logistic_regression      0.6948         0.6964      0.0092     0.0016            0       5
+         xgboost                  0.6853         0.6886      0.0130     0.0034            0       5
+test     dualtower_ft             0.6606         0.6268      0.0628    -0.0338            1       5
+         logistic_regression      0.6449         0.6325      0.0650    -0.0125            1       5
+         xgboost                  0.6474         0.6304      0.0515    -0.0170            0       5
