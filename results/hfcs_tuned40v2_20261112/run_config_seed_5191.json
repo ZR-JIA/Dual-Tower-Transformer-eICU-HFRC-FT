@@ -1,0 +1,21 @@
+{
+  "packs": "/home/lab/hfcs/preprocessing/eICU/train_ready_hfcs/PACKS/patient_stratified",
+  "external": "/home/lab/hfcs/preprocessing/MIMIC/data/hfcs/external",
+  "out": "/home/lab/hfcs/outputs/hfcs_tuned",
+  "run_name": "tuned40v2",
+  "models": [
+    "dualtower_ft",
+    "dualtower",
+    "xgboost",
+    "random_forest",
+    "logistic_regression"
+  ],
+  "splits": "seed_5191",
+  "trials": 40,
+  "device": "cuda",
+  "variant": "full",
+  "summarise": null,
+  "compare": null,
+  "torch": "2.5.1",
+  "optuna": "4.6.0"
+}
