@@ -5,7 +5,7 @@ eICU test set and on the MIMIC-IV external cohort.
 
 The packs are already imputed, standardised (numeric) and label-encoded
 (categorical) with transforms fitted on each split's eICU TRAINING data
-(preprocessing/eICU and preprocessing/MIMIC, branch hfcs-24h). This driver
+(preprocessing/eICU and preprocessing/MIMIC, branch hfcs). This driver
 therefore does NOT run TabularPreprocessor: doing so would re-scale the
 categorical codes and clamp the z-scored age column to [0, 149] through the
 substring rule in _validate_categoricals.
