@@ -1,8 +1,109 @@
-# DualTower-FT with an Adaptive Runtime Safeguard: A Deep Tabular Approach for ICU Stroke Mortality
+# DualTower-FT for Heart Failure-Related Cardiogenic Shock
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
+
+This repository adapts DualTower-FT, a dual-tower deep tabular model with a
+runtime input safeguard first built for ICU stroke (PRICAI 2026), to predict
+in-hospital death in **heart failure-related cardiogenic shock (HF-CS)** from the
+first 24 hours of intensive care, and compares it with equally tuned classical
+models. The HF-CS work is described first. The second part of this README, from
+[Original stroke model](#original-stroke-model-pricai-2026), documents the
+PRICAI 2026 code on which it is built.
+
+**Paper**: Z. Jia (2026). *An Approach to Mortality Prediction in Heart Failure-Related Cardiogenic Shock Using Adaptation and Evaluation of DualTower-FT.* Manuscript.
+
+> **Disclaimer**: for academic research only. Not a medical device;
+> not for clinical decisions. See [LICENSE](LICENSE).
+
+---
+
+## HF-CS study
+
+### Data
+
+| | Development | External validation |
+|---|---|---|
+| Database | eICU-CRD v2.0 | MIMIC-IV v3.1 |
+| Patients (deaths) | 364 (98) from 88 hospitals | 986 (284), one hospital |
+| Preprocessing | [Data-Preprocessing-for-eICU](https://github.com/ZR-JIA/Data-Preprocessing-for-eICU), branch `hfcs` | [Data-Preprocessing-for-MIMIC](https://github.com/ZR-JIA/Data-Preprocessing-for-MIMIC), branch `hfcs` |
+
+Both databases require [PhysioNet](https://physionet.org/) credentialing and a
+signed data use agreement. **This repository contains no patient-level data**:
+only code, configurations and aggregate results. Patient-level prediction files
+are not included.
+
+### What was added for HF-CS
+
+| File | Purpose |
+|---|---|
+| `src/train/run_hfcs_tuned.py` | Main experiment: five splits, equal-budget Optuna tuning (TPE, 40 trials, stratified 3-fold inner cross-validation) for DualTower-FT, DT-Transformer, XGBoost, random forest and logistic regression; refit on the development set; evaluation on the eICU test set and MIMIC-IV; paired bootstrap tests; ablations (`--variant`) |
+| `src/train/analyze_hfcs_tuned.py` | Aggregate analyses: APACHE IV comparison on the same patients, tuning optimism, selected hyperparameters, ROC and calibration figure |
+| `src/train/run_hfcs_experiments.py` | Preliminary comparison with published configurations (no tuning) |
+| `src/train/architectures/models/dualtower_ft.py` | `pooling` option (`cls` or `mean`) for the ablation |
+| `src/train/utils/statistical_tests.py` | Paired class-stratified bootstrap; corrected DeLong test |
+| `src/train/engine/trainers.py` | XGBoost early stopping fixed for XGBoost 2.0 or later |
+| `src/train/tests/` | Tests for the DeLong test and the ablation variants |
+
+### Reproducing the results
+
+Run from `src/train`, one process per split (`seed_42`, `seed_5191`, `seed_5390`,
+`seed_7270`, `seed_860`) so that splits can run in parallel. `PACKS` and
+`EXTERNAL` are the outputs of the two preprocessing repositories.
+
+```bash
+PACKS=.../Data-Preprocessing-for-eICU/train_ready_hfcs/PACKS/patient_stratified
+EXTERNAL=.../Data-Preprocessing-for-MIMIC/data/hfcs/external
+OUT=../../outputs/hfcs_tuned
+
+# Main comparison, all five learners
+python run_hfcs_tuned.py --packs $PACKS --external $EXTERNAL --out $OUT \
+    --run-name tuned40v2 --splits seed_42 --trials 40
+python run_hfcs_tuned.py --summarise $OUT/tuned40v2
+python analyze_hfcs_tuned.py $OUT/tuned40v2
+
+# Ablation, for example without the hospital input, then the paired comparison
+python run_hfcs_tuned.py --packs $PACKS --external $EXTERNAL --out $OUT \
+    --run-name abl_no_site --variant no_site --models dualtower_ft --splits seed_42
+python run_hfcs_tuned.py --compare $OUT/tuned40v2 $OUT/abl_no_site
+```
+
+Ablation variants: `mean_pool` (mean pooling instead of the [CLS] token),
+`no_safeguard` (runtime safeguard off), `no_site` (hospital input removed) and
+`no_shock` (the ten shock-specific inputs removed; run it with
+`--models dualtower_ft,logistic_regression,xgboost`). One split takes 15 to 20
+minutes on an NVIDIA RTX 4060 Laptop GPU.
+
+### Results
+
+Mean AUROC over the five splits after equal tuning (from
+`results/hfcs_tuned40v2_20261112/`):
+
+| Model | Internal (eICU test) | External (MIMIC-IV) | External ECE |
+|---|---|---|---|
+| DualTower-FT (adapted) | 0.661 | 0.668 | 0.183 |
+| DT-Transformer | 0.662 | 0.671 | 0.148 |
+| XGBoost | 0.647 | 0.685 | 0.090 |
+| Random forest | 0.670 | 0.683 | 0.054 |
+| Logistic regression | 0.645 | 0.695 | 0.178 |
+| APACHE IV | 0.661 | not available | |
+
+DualTower-FT matched APACHE IV internally but did not outperform the classical
+models externally, and no ablated component had a consistent effect.
+
+| Folder in `results/` | Content |
+|---|---|
+| `hfcs_tuned40v2_20261112/` | Main results reported in the paper; ablations in `abl_*/` |
+| `hfcs_tuned40_20261112/` | First tuned run, superseded: early stopping used the scored inner fold |
+| `hfcs_final_run_20261112_152201/` | Preliminary run with untuned baselines |
+
+---
+
+# Original stroke model (PRICAI 2026)
+
+*DualTower-FT with an Adaptive Runtime Safeguard: A Deep Tabular Approach for ICU
+Stroke Mortality.* The rest of this README is the documentation of that release.
 
 > [!NOTE]
 > Some descriptions in the PRICAI 2026 paper differ from the experiments as run. See [Clarifications to the paper](#clarifications-to-the-paper). All reported numbers are unaffected.
