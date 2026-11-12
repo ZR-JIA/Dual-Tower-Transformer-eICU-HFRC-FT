@@ -46,10 +46,13 @@ class FTRightTower(nn.Module):
         → prepend cls_token         → tokens [B, N+1, d_model]
         → TransformerEncoder        → tokens [B, N+1, d_model]
         → tokens[:, 0, :]           → cls_out [B, d_model]
+
+    pooling="mean" is an ablation switch: no [CLS] token is prepended and the
+    encoder outputs are averaged; everything else stays the same.
     """
 
     def __init__(self, input_dim: int, d_model: int, nhead: int,
-                 num_layers: int, dropout: float):
+                 num_layers: int, dropout: float, pooling: str = "cls"):
         """
         Args:
             input_dim:  Number of numerical features
@@ -57,8 +60,12 @@ class FTRightTower(nn.Module):
             nhead:      Number of self-attention heads
             num_layers: Number of TransformerEncoder layers
             dropout:    Dropout rate
+            pooling:    "cls" (default) or "mean" (ablation)
         """
         super().__init__()
+        if pooling not in ("cls", "mean"):
+            raise ValueError(f"pooling must be 'cls' or 'mean', got {pooling!r}")
+        self.pooling = pooling
         self.tokenizer = NumericalFeatureTokenizer(input_dim, d_model)
 
         # Learnable [CLS] token — initialized to zero, learned during training
@@ -85,6 +92,8 @@ class FTRightTower(nn.Module):
         """
         B = x.size(0)
         tokens = self.tokenizer(x)                          # [B, N, d_model]
+        if self.pooling == "mean":
+            return self.transformer_encoder(tokens).mean(dim=1)
 
         # Prepend [CLS] token
         cls = self.cls_token.expand(B, -1, -1)             # [B, 1, d_model]
@@ -151,7 +160,8 @@ class DualTowerFT(nn.Module):
             d_model=d_model,
             nhead=arch.get('trans_nhead', 4),
             num_layers=arch.get('trans_num_layers', 2),
-            dropout=arch['dropout']
+            dropout=arch['dropout'],
+            pooling=arch.get('pooling', 'cls')
         )
         right_output_dim = d_model
 

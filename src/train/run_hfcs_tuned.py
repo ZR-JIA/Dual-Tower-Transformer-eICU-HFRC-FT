@@ -11,10 +11,21 @@ For each outer split (seed_*):
     stratified 3-fold cross-validation on the development set;
   * the best configuration is refitted on the whole development set and scored
     on the test set and on MIMIC-IV.
-Neural models use early stopping on the inner validation fold (AUROC,
-patience 15, at most 100 epochs); the refit trains for the median best epoch of
-the best trial's folds, with the same cosine schedule. XGBoost tunes the number
-of trees directly (no early stopping). APACHE IV is scored on the test set.
+The scored inner fold is never used for training decisions: neural models
+stop early (AUROC, patience 15, at most 100 epochs) on a stratified 20% of the
+inner TRAINING folds, and the refit trains for the median best epoch of the
+best trial's folds, with the same cosine schedule. XGBoost tunes the number of
+trees directly (no early stopping). Class weighting (balanced or none) is a
+tuned choice for every learner. APACHE IV is scored on the test set.
+
+--variant runs an ablation of DualTower-FT with the same tuning protocol:
+  mean_pool     mean pooling instead of the [CLS] token
+  no_safeguard  runtime safeguard switched off (training and inference)
+  no_site       hospital (site_id) removed from the inputs
+  no_shock      shock-specific inputs removed (vasoactive, ventilation, MCS
+                flags and cuff mean arterial pressure summaries)
+--compare FULL_RUN VARIANT_RUN tests each model of the variant run against the
+same model of the full run on the same patients (paired bootstrap).
 DualTower-FT is compared with every other score by a paired, class-stratified
 bootstrap of the AUROC difference (2,000 resamples).
 
@@ -26,8 +37,10 @@ label-free.
 Usage (from src/train), one process per split so splits can run in parallel:
     python run_hfcs_tuned.py --packs .../PACKS/patient_stratified \
         --external .../MIMIC/data/hfcs/external --out ../../outputs/hfcs_tuned \
-        --run-name tuned --splits seed_42
+        --run-name tuned --splits seed_42 [--variant no_site --models dualtower_ft]
     python run_hfcs_tuned.py --summarise ../../outputs/hfcs_tuned/tuned
+    python run_hfcs_tuned.py --compare ../../outputs/hfcs_tuned/tuned \
+        ../../outputs/hfcs_tuned/abl_no_site
 """
 import argparse
 import copy
@@ -44,14 +57,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder
 from xgboost import XGBClassifier
 
 from architectures.model_factory import build_model
 from engine.trainers import NeuralTrainer
-from run_hfcs_experiments import CAT_COLS, arrays, evaluate, load_split, loader, neural_config
+from run_hfcs_experiments import CAT_COLS, arrays, evaluate, load_split, loader
 from utils.config_manager import ConfigManager
 from utils.seed import set_all_seeds
 from utils.statistical_tests import paired_bootstrap_auroc
@@ -64,13 +77,24 @@ log.setLevel(logging.INFO)
 MODELS = ["dualtower_ft", "dualtower", "xgboost", "random_forest", "logistic_regression"]
 NEURAL = {"dualtower_ft", "dualtower"}
 REFERENCE = "dualtower_ft"
-MAX_EPOCHS, PATIENCE, INNER_FOLDS = 100, 15, 3
+MAX_EPOCHS, PATIENCE, INNER_FOLDS, ES_FRACTION = 100, 15, 3, 0.2
+
+SHOCK_COLS = ["vasopressor_24h", "inotrope_24h", "n_vasoactive_24h", "mech_vent_24h",
+              "mcs_24h", "noninvasivemean_mean", "noninvasivemean_std",
+              "noninvasivemean_min", "noninvasivemean_max", "noninvasivemean_slope"]
+VARIANTS = {
+    "full": {},
+    "mean_pool": {"pooling": "mean"},
+    "no_safeguard": {"safeguard": False},
+    "no_site": {"drop": ["site_id"]},
+    "no_shock": {"drop": SHOCK_COLS},
+}
 
 
 # ------------------------------------------------------------ search spaces --
 def neural_params(trial):
     return {
-        "trans_d_model": trial.suggest_categorical("trans_d_model", [32, 64, 128]),
+        "trans_d_model": trial.suggest_categorical("trans_d_model", [32, 64, 128, 256]),
         "trans_nhead": trial.suggest_categorical("trans_nhead", [2, 4]),
         "trans_num_layers": trial.suggest_int("trans_num_layers", 1, 3),
         "dropout": trial.suggest_float("dropout", 0.0, 0.5),
@@ -78,6 +102,7 @@ def neural_params(trial):
         "lr": trial.suggest_float("lr", 1e-4, 3e-3, log=True),
         "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True),
         "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
+        "class_weight": trial.suggest_categorical("class_weight", ["balanced", "none"]),
     }
 
 
@@ -92,6 +117,7 @@ def xgb_params(trial):
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 20.0, log=True),
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 20.0, log=True),
         "gamma": trial.suggest_float("gamma", 0.0, 5.0),
+        "class_weight": trial.suggest_categorical("class_weight", ["balanced", "none"]),
     }
 
 
@@ -120,18 +146,48 @@ SPACES = {"dualtower_ft": neural_params, "dualtower": neural_params, "xgboost": 
 
 
 # ---------------------------------------------------------------- learners --
+def neural_config(cm, name, features, frames, seed):
+    """Published configuration with the categorical inputs present in `features`.
+
+    num_classes is raised to the observed cardinality (all sets, including the
+    external cohort, so every code has an embedding row)."""
+    cfg = copy.deepcopy(cm.load_config(name))
+    published = sorted(cfg["model_config"]["architecture"]["cat_features"],
+                       key=lambda c: int(c["index"]))
+    cats = []
+    for spec, col in zip(published, CAT_COLS):
+        if col not in features:
+            continue
+        idx = features.index(col)
+        if "site_id" in features and idx != int(spec["index"]):
+            raise RuntimeError(f"{col} is at index {idx}, config expects {spec['index']}")
+        observed = int(max(df[col].max() for df in frames.values())) + 1
+        cats.append({"name": col, "index": idx,
+                     "num_classes": max(int(spec["num_classes"]), observed),
+                     "emb_dim": int(spec["emb_dim"])})
+    cfg["model_config"]["architecture"]["cat_features"] = cats
+    cfg.setdefault("common", {}).setdefault("reproducibility", {})["seed"] = seed
+    return cfg
+
+
 class Learner:
     """fit(X_df, y) / predict(X_df) wrapper with one interface for all models."""
 
-    def __init__(self, name, params, cm, features, frames, seed, device):
+    def __init__(self, name, params, cm, features, frames, seed, device, variant="full"):
         self.name, self.params, self.seed, self.device = name, dict(params), seed, device
         self.features, self.cm, self.frames = features, cm, frames
+        self.variant = VARIANTS[variant]
+        self.cat_cols = [c for c in CAT_COLS if c in features]
         self.best_epoch = None
 
     # neural ---------------------------------------------------------------
     def _neural_cfg(self, early_stopping):
         cfg = neural_config(self.cm, self.name, self.features, self.frames, self.seed)
+        cfg["model_config"].setdefault("loss", {})["pos_weight"] = (
+            "auto" if self.params["class_weight"] == "balanced" else 1.0)
         arch = cfg["model_config"]["architecture"]
+        if "pooling" in self.variant:
+            arch["pooling"] = self.variant["pooling"]
         for k in ("trans_d_model", "trans_nhead", "trans_num_layers", "dropout",
                   "fusion_hidden_dim"):
             arch[k] = self.params[k]
@@ -147,11 +203,26 @@ class Learner:
         return cfg
 
     def fit_neural(self, tr, va=None, epochs=None):
+        # Splits share one GPU; on a transient out-of-memory error wait and
+        # retry the same fit instead of dropping the configuration.
+        for attempt in range(5):
+            try:
+                return self._fit_neural(tr, va, epochs)
+            except torch.cuda.OutOfMemoryError:
+                self.trainer = None
+                torch.cuda.empty_cache()
+                log.warning(f"{self.name}: CUDA out of memory, retry {attempt + 1}/5")
+                time.sleep(60)
+        return self._fit_neural(tr, va, epochs)
+
+    def _fit_neural(self, tr, va=None, epochs=None):
         cfg = self._neural_cfg(early_stopping=va is not None)
         set_all_seeds(self.seed)
         bs = self.params["batch_size"]
         Xtr, ytr = arrays(tr, self.features)
         model = build_model(self.name, cfg, len(self.features))
+        if not self.variant.get("safeguard", True):
+            model.safeguard_enabled = False
         self.trainer = NeuralTrainer(model, cfg, self.device)
         val_df = va if va is not None else tr
         Xva, yva = arrays(val_df, self.features)
@@ -163,9 +234,10 @@ class Learner:
 
     # classical ------------------------------------------------------------
     def _classical(self, ytr):
-        p = self.params
+        p = dict(self.params)
         if self.name == "xgboost":
-            spw = float((ytr == 0).sum() / max((ytr == 1).sum(), 1))
+            balanced = p.pop("class_weight") == "balanced"
+            spw = float((ytr == 0).sum() / max((ytr == 1).sum(), 1)) if balanced else 1.0
             return XGBClassifier(**p, scale_pos_weight=spw, tree_method="hist",
                                  eval_metric="auc", n_jobs=4, random_state=self.seed,
                                  verbosity=0)
@@ -173,7 +245,7 @@ class Learner:
             q = dict(p)
             q["class_weight"] = None if q["class_weight"] == "none" else q["class_weight"]
             return RandomForestClassifier(**q, n_jobs=4, random_state=self.seed)
-        cat_idx = [self.features.index(c) for c in CAT_COLS]
+        cat_idx = [self.features.index(c) for c in self.cat_cols]
         num_idx = [i for i in range(len(self.features)) if i not in cat_idx]
         return make_pipeline(
             ColumnTransformer([("cat", OneHotEncoder(handle_unknown="ignore"), cat_idx),
@@ -198,7 +270,14 @@ class Learner:
 
 
 # ----------------------------------------------------------------- tuning ----
-def tune(name, dev, cm, features, frames, seed, device, n_trials):
+def early_stopping_split(tr, seed):
+    """Stratified ES_FRACTION of the inner training folds for early stopping."""
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=ES_FRACTION, random_state=seed)
+    i_fit, i_es = next(sss.split(tr, tr["mortality"]))
+    return tr.iloc[i_fit], tr.iloc[i_es]
+
+
+def tune(name, dev, cm, features, frames, seed, device, n_trials, variant="full"):
     folds = list(StratifiedKFold(INNER_FOLDS, shuffle=True, random_state=seed)
                  .split(dev, dev["mortality"]))
 
@@ -207,9 +286,11 @@ def tune(name, dev, cm, features, frames, seed, device, n_trials):
         aucs, epochs = [], []
         for k, (i_tr, i_va) in enumerate(folds):
             tr, va = dev.iloc[i_tr], dev.iloc[i_va]
-            learner = Learner(name, params, cm, features, frames, seed, device)
+            learner = Learner(name, params, cm, features, frames, seed, device, variant)
             if name in NEURAL:
-                learner.fit(tr, va)
+                # the scored fold `va` is never seen during training
+                fit, es = early_stopping_split(tr, seed + k)
+                learner.fit(fit, es)
                 epochs.append(learner.best_epoch)
             else:
                 learner.fit(tr)
@@ -226,10 +307,15 @@ def tune(name, dev, cm, features, frames, seed, device, n_trials):
     return study
 
 
-def run_split(pack, external_root, out_root, models, n_trials, device):
+def run_split(pack, external_root, out_root, models, n_trials, device, variant="full"):
     seed = int(pack.name.split("_")[1])
     cm = ConfigManager()
     frames, features, apache = load_split(pack, external_root)
+    drop = VARIANTS[variant].get("drop", [])
+    missing = [c for c in drop if c not in features]
+    if missing:
+        raise RuntimeError(f"variant {variant}: columns not found {missing}")
+    features = [c for c in features if c not in drop]
     dev = pd.concat([frames["train"], frames["val"]], ignore_index=True)
     sets = [s for s in ("test", "external") if s in frames]
     preds = {s: pd.DataFrame({"patient_id": frames[s]["patient_id"],
@@ -240,11 +326,12 @@ def run_split(pack, external_root, out_root, models, n_trials, device):
 
     for name in models:
         t0 = time.time()
-        study = tune(name, dev, cm, features, frames, seed, device, n_trials)
+        study = tune(name, dev, cm, features, frames, seed, device, n_trials, variant)
         best = study.best_trial
         params = SPACES[name](optuna.trial.FixedTrial(best.params))
         epochs = int(np.median(best.user_attrs["best_epochs"])) if name in NEURAL else None
-        final = Learner(name, params, cm, features, frames, seed, device).fit(dev, epochs=epochs)
+        final = Learner(name, params, cm, features, frames, seed, device,
+                        variant).fit(dev, epochs=epochs)
         results[name] = {}
         for s in sets:
             p = final.predict(frames[s])
@@ -284,7 +371,8 @@ def run_split(pack, external_root, out_root, models, n_trials, device):
     for s in sets:
         preds[s].to_csv(out / f"predictions_{s}.csv", index=False)
     with open(out / "metrics.json", "w") as f:
-        json.dump({"seed": seed, "n_trials": n_trials, "inner_folds": INNER_FOLDS,
+        json.dump({"seed": seed, "variant": variant, "n_features": len(features),
+                   "n_trials": n_trials, "inner_folds": INNER_FOLDS,
                    "results": results, "tuning": tuning, "bootstrap": comparisons}, f, indent=2)
 
 
@@ -316,6 +404,36 @@ def summarise(run_dir):
     print(cs.to_string())
 
 
+def compare(full_dir, variant_dir):
+    """Paired bootstrap of each variant model against the same model of the full run."""
+    full_dir, variant_dir = Path(full_dir), Path(variant_dir)
+    rows = []
+    for vf in sorted(variant_dir.glob("seed_*/predictions_*.csv")):
+        split, s = vf.parent.name, vf.stem.replace("predictions_", "")
+        v, f = pd.read_csv(vf), pd.read_csv(full_dir / split / vf.name)
+        m = f.merge(v, on=["patient_id", "mortality"], suffixes=("_full", "_var"))
+        if len(m) != len(v):
+            raise RuntimeError(f"{split}/{s}: patients differ between runs")
+        seed = int(split.split("_")[1])
+        for model in [c for c in v.columns if c in MODELS]:
+            y = m["mortality"].to_numpy()
+            r = paired_bootstrap_auroc(y, m[f"{model}_var"].to_numpy(),
+                                       m[f"{model}_full"].to_numpy(),
+                                       n_bootstrap=2000, random_state=seed)
+            rows.append({"split": split, "set": s, "model": model,
+                         "auroc_full": roc_auc_score(y, m[f"{model}_full"]),
+                         "auroc_variant": roc_auc_score(y, m[f"{model}_var"]), **r})
+    df = pd.DataFrame(rows)
+    df.to_csv(variant_dir / "compare_long.csv", index=False)
+    agg = df.groupby(["set", "model"]).agg(
+        auroc_full=("auroc_full", "mean"), auroc_variant=("auroc_variant", "mean"),
+        sd_variant=("auroc_variant", "std"), mean_diff=("auroc_diff", "mean"),
+        significant=("p_value", lambda p: int((p < 0.05).sum())),
+        splits=("p_value", "size")).round(4)
+    agg.to_csv(variant_dir / "compare_summary.csv")
+    print(agg.to_string())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--packs")
@@ -326,10 +444,15 @@ def main():
     ap.add_argument("--splits", default=None)
     ap.add_argument("--trials", type=int, default=40)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--variant", default="full", choices=sorted(VARIANTS))
     ap.add_argument("--summarise", default=None, help="run directory to summarise")
+    ap.add_argument("--compare", nargs=2, metavar=("FULL_RUN", "VARIANT_RUN"), default=None)
     args = ap.parse_args()
     if args.summarise:
         summarise(args.summarise)
+        return
+    if args.compare:
+        compare(*args.compare)
         return
 
     device = torch.device(args.device)
@@ -344,7 +467,7 @@ def main():
                                 "optuna": optuna.__version__}, f, indent=2)
     external_root = Path(args.external) if args.external else None
     for pack in packs:
-        run_split(pack, external_root, out_root, models, args.trials, device)
+        run_split(pack, external_root, out_root, models, args.trials, device, args.variant)
 
 
 if __name__ == "__main__":
