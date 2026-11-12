@@ -52,19 +52,17 @@ def delong_test(
         logger.warning("DeLong test requires both positive and negative samples")
         return np.nan, np.nan, auc_diff
     
-    # Structural components
-    X1 = y_pred1[pos_mask]
-    Y1 = y_pred1[neg_mask]
-    X2 = y_pred2[pos_mask]
-    Y2 = y_pred2[neg_mask]
-    
-    # Compute V10 and V01 for both models
-    V10_1 = _compute_midrank(X1)
-    V01_1 = _compute_midrank(Y1)
-    V10_2 = _compute_midrank(X2)
-    V01_2 = _compute_midrank(Y2)
-    
-    # Compute covariance matrix
+    # Structural components (placement values). V10[i] is the fraction of
+    # negatives scored below positive i (ties count 1/2); V01[j] is the
+    # fraction of positives scored above negative j. They are obtained from
+    # midranks over the pooled scores (Sun & Xu, 2014, "fast DeLong").
+    # Previously V10/V01 were the within-group ranks of each sample, which are
+    # not placement values: the variance was inflated by orders of magnitude
+    # and every p-value came out close to 1.
+    V10_1, V01_1 = _placement_values(y_pred1[pos_mask], y_pred1[neg_mask])
+    V10_2, V01_2 = _placement_values(y_pred2[pos_mask], y_pred2[neg_mask])
+
+    # Variance of the AUROC difference
     V10_diff = V10_1 - V10_2
     V01_diff = V01_1 - V01_2
     
@@ -83,6 +81,23 @@ def delong_test(
     p_value = 2 * (1 - norm.cdf(abs(z_stat)))  # Two-tailed test
     
     return z_stat, p_value, auc_diff
+
+
+def _placement_values(pos_scores: np.ndarray, neg_scores: np.ndarray):
+    """
+    DeLong placement values via midranks (Sun & Xu, 2014).
+
+    Returns (v10, v01): v10[i] = P(neg < pos_i) + 0.5 P(neg == pos_i) over the
+    negatives; v01[j] = P(pos > neg_j) + 0.5 P(pos == neg_j) over the
+    positives. mean(v10) == mean(v01) == AUROC.
+    """
+    from scipy.stats import rankdata
+
+    m, n = len(pos_scores), len(neg_scores)
+    pooled = rankdata(np.concatenate([pos_scores, neg_scores]))
+    v10 = (pooled[:m] - rankdata(pos_scores)) / n
+    v01 = 1.0 - (pooled[m:] - rankdata(neg_scores)) / m
+    return v10, v01
 
 
 def _compute_midrank(x: np.ndarray) -> np.ndarray:
