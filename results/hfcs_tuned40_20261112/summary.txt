@@ -1,0 +1,26 @@
+                               auroc           auprc           brier             ece        
+                                mean     std    mean     std    mean     std    mean     std
+set      model                                                                              
+external dualtower            0.6647  0.0268  0.4583  0.0296  0.2197  0.0285  0.1442  0.0756
+         dualtower_ft         0.6667  0.0109  0.4556  0.0194  0.2464  0.0624  0.1927  0.0944
+         logistic_regression  0.6948  0.0086  0.4782  0.0156  0.2221  0.0158  0.1776  0.0572
+         random_forest        0.6833  0.0114  0.4887  0.0085  0.1908  0.0056  0.0545  0.0445
+         xgboost              0.6927  0.0150  0.4931  0.0198  0.1911  0.0090  0.0719  0.0343
+test     apache_iv            0.6607  0.0440  0.5546  0.0289  0.1765  0.0138  0.1186  0.0372
+         dualtower            0.6655  0.0761  0.4943  0.0772  0.2187  0.0425  0.2037  0.0513
+         dualtower_ft         0.6443  0.0701  0.4776  0.1003  0.2357  0.0528  0.2237  0.0646
+         logistic_regression  0.6449  0.0448  0.5108  0.0350  0.2231  0.0227  0.1998  0.0656
+         random_forest        0.6699  0.0395  0.5512  0.0608  0.1871  0.0107  0.1110  0.0496
+         xgboost              0.6415  0.0553  0.4985  0.0954  0.1988  0.0243  0.1394  0.0473
+
+                                              mean_diff  significant  splits
+set      comparison                                                         
+external dualtower_ft_vs_dualtower               0.0020            2       5
+         dualtower_ft_vs_logistic_regression    -0.0281            3       5
+         dualtower_ft_vs_random_forest          -0.0166            1       5
+         dualtower_ft_vs_xgboost                -0.0260            3       5
+test     dualtower_ft_vs_apache_iv              -0.0369            0       5
+         dualtower_ft_vs_dualtower              -0.0211            0       5
+         dualtower_ft_vs_logistic_regression    -0.0006            0       5
+         dualtower_ft_vs_random_forest          -0.0256            1       5
+         dualtower_ft_vs_xgboost                 0.0028            0       5

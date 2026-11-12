@@ -116,6 +116,51 @@ def _compute_midrank(x: np.ndarray) -> np.ndarray:
     return ranks
 
 
+def paired_bootstrap_auroc(
+    y_true: np.ndarray,
+    y_pred1: np.ndarray,
+    y_pred2: np.ndarray,
+    n_bootstrap: int = 2000,
+    alpha: float = 0.05,
+    random_state: int = 42,
+) -> Dict[str, float]:
+    """
+    Paired, class-stratified bootstrap of the AUROC difference (model 1 - model 2).
+
+    Patients are resampled with replacement within each class, and both
+    models are scored on the same resample, so the correlation between the
+    two sets of predictions is preserved. The two-sided p-value is
+    2 * min(P(diff <= 0), P(diff >= 0)) over the resamples, bounded below by
+    1 / n_bootstrap.
+
+    Returns:
+        dict with auroc_diff (on the full sample), ci_lower, ci_upper, p_value
+    """
+    from sklearn.metrics import roc_auc_score
+
+    y_true = np.asarray(y_true)
+    y_pred1, y_pred2 = np.asarray(y_pred1), np.asarray(y_pred2)
+    pos, neg = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
+    if len(pos) == 0 or len(neg) == 0:
+        return {"auroc_diff": np.nan, "ci_lower": np.nan, "ci_upper": np.nan,
+                "p_value": np.nan}
+
+    rng = np.random.default_rng(random_state)
+    diffs = np.empty(n_bootstrap)
+    for b in range(n_bootstrap):
+        idx = np.concatenate([rng.choice(pos, len(pos)), rng.choice(neg, len(neg))])
+        yb = y_true[idx]
+        diffs[b] = roc_auc_score(yb, y_pred1[idx]) - roc_auc_score(yb, y_pred2[idx])
+
+    p = 2 * min((diffs <= 0).mean(), (diffs >= 0).mean())
+    return {
+        "auroc_diff": float(roc_auc_score(y_true, y_pred1) - roc_auc_score(y_true, y_pred2)),
+        "ci_lower": float(np.percentile(diffs, 100 * alpha / 2)),
+        "ci_upper": float(np.percentile(diffs, 100 * (1 - alpha / 2))),
+        "p_value": float(min(1.0, max(p, 1.0 / n_bootstrap))),
+    }
+
+
 def paired_ttest(
     metric_values1: np.ndarray,
     metric_values2: np.ndarray

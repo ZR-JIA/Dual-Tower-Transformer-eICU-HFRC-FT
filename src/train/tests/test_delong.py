@@ -58,3 +58,20 @@ def test_same_model_is_not_significant():
     s = y + rng.normal(0, 1, 200)
     z, p, diff = delong_test(y, s, s + 1e-12 * rng.normal(size=200))
     assert abs(diff) < 1e-6 and (np.isnan(p) or p > 0.5)
+
+
+def test_paired_bootstrap_detects_and_rejects_differences():
+    boot = _st.paired_bootstrap_auroc
+    rng = np.random.default_rng(4)
+    y = np.r_[np.ones(200), np.zeros(500)]
+    good = y * 1.5 + rng.normal(0, 1, 700)
+    noise = rng.normal(0, 1, 700)
+    r = boot(y, good, noise, n_bootstrap=500, random_state=0)
+    assert r["auroc_diff"] > 0.3 and r["ci_lower"] > 0 and r["p_value"] <= 0.01
+    same = boot(y, good, good + 1e-9 * rng.normal(size=700), n_bootstrap=500, random_state=0)
+    assert abs(same["auroc_diff"]) < 1e-6 and same["p_value"] > 0.05
+    # agrees with DeLong on a moderate difference
+    mid = y * 0.8 + rng.normal(0, 1, 700)
+    rb = boot(y, good, mid, n_bootstrap=1000, random_state=0)
+    _, p_delong, _ = delong_test(y, good, mid)
+    assert (rb["p_value"] < 0.05) == (p_delong < 0.05)
