@@ -506,11 +506,22 @@ class TreeTrainer:
             fit_signature = inspect.signature(self.model.fit)
             supports_callbacks = 'callbacks' in fit_signature.parameters
             supports_early_stopping_rounds = 'early_stopping_rounds' in fit_signature.parameters
-            
-            logger.info(f"XGBoost fit API: supports_callbacks={supports_callbacks}, "
+            # XGBoost >= 2.0 takes early_stopping_rounds as an estimator
+            # parameter and removed it (and callbacks) from fit(). Without this
+            # branch, XGBoost 3.x fell through to "version too old" below and
+            # trained all n_estimators rounds with no early stopping.
+            supports_estimator_param = 'early_stopping_rounds' in self.model.get_params()
+
+            logger.info(f"XGBoost fit API: estimator_param={supports_estimator_param}, "
+                       f"supports_callbacks={supports_callbacks}, "
                        f"supports_early_stopping_rounds={supports_early_stopping_rounds}")
-            
-            if supports_callbacks:
+
+            if supports_estimator_param and not supports_early_stopping_rounds:
+                self.model.set_params(early_stopping_rounds=early_stopping_rounds)
+                self.model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+                logger.info("Using XGBoost estimator parameter early_stopping_rounds")
+
+            elif supports_callbacks:
                 # XGBoost 2.x+ uses callbacks
                 try:
                     from xgboost.callback import EarlyStopping
