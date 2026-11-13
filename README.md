@@ -39,12 +39,12 @@ are not included.
 | File | Purpose |
 |---|---|
 | `src/train/run_hfcs_tuned.py` | Main experiment: five splits, equal-budget Optuna tuning (TPE, 40 trials, stratified 3-fold inner cross-validation) for DualTower-FT, DT-Transformer, XGBoost, random forest and logistic regression; refit on the development set; evaluation on the eICU test set and MIMIC-IV; paired bootstrap tests; ablations (`--variant`) |
-| `src/train/analyze_hfcs_tuned.py` | Aggregate analyses: APACHE IV comparison on the same patients, tuning optimism, selected hyperparameters, ROC and calibration figure |
+| `src/train/analyze_hfcs_tuned.py` | Aggregate analyses: APACHE IV comparison on the same patients, tuning optimism, selected hyperparameters, external AUROC with a patient-bootstrap 95% CI, calibration intercept and slope, ROC and calibration figure |
 | `src/train/run_hfcs_experiments.py` | Preliminary comparison with published configurations (no tuning) |
 | `src/train/architectures/models/dualtower_ft.py` | `pooling` option (`cls` or `mean`) for the ablation |
 | `src/train/utils/statistical_tests.py` | Paired class-stratified bootstrap; corrected DeLong test |
 | `src/train/engine/trainers.py` | XGBoost early stopping fixed for XGBoost 2.0 or later |
-| `src/train/tests/` | Tests for the DeLong test and the ablation variants |
+| `src/train/tests/` | Tests for the DeLong test, the ablation variants and the calibration measures |
 
 ### Reproducing the results
 
