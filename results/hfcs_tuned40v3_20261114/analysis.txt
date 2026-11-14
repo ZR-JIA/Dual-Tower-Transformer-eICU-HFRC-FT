@@ -1,0 +1,28 @@
+== same APACHE subset
+                      auroc_mean  auroc_std  auprc_mean  auprc_std  n_min  n_max
+model                                                                          
+apache_iv                0.6607     0.0440      0.5546     0.0289     46     54
+dualtower                0.6740     0.0624      0.5033     0.0663     46     54
+dualtower_ft             0.6203     0.0880      0.4373     0.1107     46     54
+logistic_regression      0.6598     0.0748      0.5058     0.0755     46     54
+random_forest            0.6725     0.0558      0.5388     0.0788     46     54
+xgboost                  0.6281     0.0495      0.4323     0.0820     46     54
+== optimism
+                      inner_cv    test  external  optimism
+model                                                    
+dualtower              0.7331  0.6530    0.6614    0.0801
+dualtower_ft           0.7379  0.6168    0.6601    0.1211
+logistic_regression    0.7238  0.6547    0.6966    0.0691
+random_forest          0.7242  0.6613    0.6783    0.0628
+xgboost                0.7032  0.6362    0.6806    0.0670
+== external AUROC CI and calibration
+                       auroc  auroc_ci_low  ...  slope_min  slope_max
+model                                      ...                      
+dualtower_ft         0.6601        0.6269  ...     0.2122     1.0086
+dualtower            0.6614        0.6277  ...     0.2114     1.3094
+xgboost              0.6806        0.6457  ...     0.3959     0.7670
+random_forest        0.6783        0.6420  ...     0.8872     1.2447
+logistic_regression  0.6966        0.6591  ...     1.2797     9.3655
+
+[5 rows x 9 columns]
+wrote /home/lab/hfcs/outputs/hfcs_tuned_v3/tuned40v3/roc_cal_external.pdf

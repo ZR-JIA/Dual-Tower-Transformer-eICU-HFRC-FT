@@ -1,0 +1,11 @@
+model,set,auroc_mean,sd_between_splits,sd_across_seeds,auroc_seed_ensemble
+dualtower,external,0.661,0.0075,0.0131,0.6731
+dualtower,test,0.6674,0.0623,0.0395,0.6762
+dualtower_ft,external,0.6668,0.0146,0.0135,0.6788
+dualtower_ft,test,0.6303,0.0549,0.0279,0.6487
+logistic_regression,external,0.6966,0.007,0.0,0.6966
+logistic_regression,test,0.6547,0.0541,0.0,0.6547
+random_forest,external,0.6801,0.007,0.0029,0.6808
+random_forest,test,0.663,0.0373,0.0082,0.6619
+xgboost,external,0.6833,0.0123,0.0044,0.6872
+xgboost,test,0.6305,0.0564,0.0162,0.633

@@ -1,0 +1,4 @@
+                       auroc_full  auroc_variant  sd_variant  mean_diff  significant  splits
+set      model                                                                              
+external dualtower_ft      0.6601         0.6695      0.0224     0.0094            2       5
+test     dualtower_ft      0.6168         0.6430      0.0323     0.0262            0       5

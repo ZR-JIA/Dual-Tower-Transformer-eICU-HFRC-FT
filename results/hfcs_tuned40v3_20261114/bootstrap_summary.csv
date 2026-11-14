@@ -1,0 +1,10 @@
+set,comparison,mean_diff,significant,splits
+external,dualtower_ft_vs_dualtower,-0.0013,0,5
+external,dualtower_ft_vs_logistic_regression,-0.0365,4,5
+external,dualtower_ft_vs_random_forest,-0.0182,1,5
+external,dualtower_ft_vs_xgboost,-0.0205,2,5
+test,dualtower_ft_vs_apache_iv,-0.0403,0,5
+test,dualtower_ft_vs_dualtower,-0.0362,1,5
+test,dualtower_ft_vs_logistic_regression,-0.0379,0,5
+test,dualtower_ft_vs_random_forest,-0.0445,1,5
+test,dualtower_ft_vs_xgboost,-0.0194,0,5

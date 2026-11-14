@@ -1,0 +1,7 @@
+model,auroc_mean,auroc_std,auprc_mean,auprc_std,n_min,n_max
+apache_iv,0.6607,0.044,0.5546,0.0289,46,54
+dualtower,0.674,0.0624,0.5033,0.0663,46,54
+dualtower_ft,0.6203,0.088,0.4373,0.1107,46,54
+logistic_regression,0.6598,0.0748,0.5058,0.0755,46,54
+random_forest,0.6725,0.0558,0.5388,0.0788,46,54
+xgboost,0.6281,0.0495,0.4323,0.082,46,54

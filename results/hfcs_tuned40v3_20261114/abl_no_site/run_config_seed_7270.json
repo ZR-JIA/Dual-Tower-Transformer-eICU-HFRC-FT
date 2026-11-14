@@ -1,0 +1,18 @@
+{
+  "packs": "/home/lab/hfcs/preprocessing/eICU/train_ready_hfcs/PACKS/patient_stratified",
+  "raw_eicu": "/home/lab/hfcs/preprocessing/eICU/outputs/hfcs/obs_cleaned.csv",
+  "raw_mimic": "/home/lab/hfcs/preprocessing/MIMIC/data/hfcs/mimic_hfcs_cleaned.csv",
+  "out": "/home/lab/hfcs/outputs/hfcs_tuned_v3",
+  "run_name": "abl_no_site",
+  "models": [
+    "dualtower_ft"
+  ],
+  "splits": "seed_7270",
+  "trials": 40,
+  "device": "cuda",
+  "variant": "no_site",
+  "summarise": null,
+  "compare": null,
+  "torch": "2.5.1",
+  "optuna": "4.6.0"
+}

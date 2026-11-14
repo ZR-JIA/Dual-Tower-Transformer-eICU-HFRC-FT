@@ -1,0 +1,6 @@
+model,inner_cv,test,external,optimism
+dualtower,0.7331,0.653,0.6614,0.0801
+dualtower_ft,0.7379,0.6168,0.6601,0.1211
+logistic_regression,0.7238,0.6547,0.6966,0.0691
+random_forest,0.7242,0.6613,0.6783,0.0628
+xgboost,0.7032,0.6362,0.6806,0.067

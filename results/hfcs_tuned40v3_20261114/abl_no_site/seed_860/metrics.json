@@ -1,0 +1,125 @@
+{
+  "seed": 860,
+  "variant": "no_site",
+  "n_features": 174,
+  "n_trials": 40,
+  "inner_folds": 3,
+  "results": {
+    "dualtower_ft": {
+      "test": {
+        "auroc": 0.6933962264150944,
+        "auprc": 0.5334945703844467,
+        "brier": 0.19355692792922585,
+        "ece": 0.13234933190149803,
+        "f1": 0.47058823529411764,
+        "precision": 0.5714285714285714,
+        "recall": 0.4,
+        "specificity": 0.8867924528301887,
+        "npv": 0.7966101694915254,
+        "balanced_accuracy": 0.6433962264150943,
+        "tp": 8.0,
+        "fp": 6.0,
+        "tn": 47.0,
+        "fn": 12.0,
+        "prevalence": 0.273972602739726,
+        "threshold": 0.5,
+        "auroc_ci_lower": 0.5311084905660378,
+        "auroc_ci_upper": 0.8339858490566038,
+        "auprc_ci_lower": 0.37412816368335117,
+        "auprc_ci_upper": 0.7397445722124594,
+        "brier_ci_lower": 0.17123317218291742,
+        "brier_ci_upper": 0.2180026276592336,
+        "n": 73.0,
+        "events": 20.0
+      },
+      "external": {
+        "auroc": 0.7112575739336303,
+        "auprc": 0.5236874618133112,
+        "brier": 0.19675525902505966,
+        "ece": 0.1326661809039648,
+        "f1": 0.4331983805668016,
+        "precision": 0.5095238095238095,
+        "recall": 0.3767605633802817,
+        "specificity": 0.8532763532763533,
+        "npv": 0.7719072164948454,
+        "balanced_accuracy": 0.6150184583283175,
+        "tp": 107.0,
+        "fp": 103.0,
+        "tn": 599.0,
+        "fn": 177.0,
+        "prevalence": 0.2880324543610548,
+        "threshold": 0.5,
+        "auroc_ci_lower": 0.6790225863729386,
+        "auroc_ci_upper": 0.7512308896111712,
+        "auprc_ci_lower": 0.477347889934747,
+        "auprc_ci_upper": 0.5828491413505973,
+        "brier_ci_lower": 0.19008487330232743,
+        "brier_ci_upper": 0.20249684796349435,
+        "n": 986.0,
+        "events": 284.0
+      }
+    },
+    "apache_iv": {
+      "test": {
+        "auroc": 0.6334586466165414,
+        "auprc": 0.5607377631234713,
+        "brier": 0.187477765572995,
+        "ece": 0.1789640598914806,
+        "f1": 0.48,
+        "precision": 0.5454545454545454,
+        "recall": 0.42857142857142855,
+        "specificity": 0.868421052631579,
+        "npv": 0.8048780487804879,
+        "balanced_accuracy": 0.6484962406015038,
+        "tp": 6.0,
+        "fp": 5.0,
+        "tn": 33.0,
+        "fn": 8.0,
+        "prevalence": 0.2692307692307692,
+        "threshold": 0.5,
+        "auroc_ci_lower": 0.4398496240601504,
+        "auroc_ci_upper": 0.8101503759398496,
+        "auprc_ci_lower": 0.36575871126942266,
+        "auprc_ci_upper": 0.7714979040859233,
+        "brier_ci_lower": 0.13170998434522882,
+        "brier_ci_upper": 0.24690324970574895,
+        "n": 52.0,
+        "events": 14.0,
+        "n_missing_score": 21
+      }
+    }
+  },
+  "tuning": {
+    "dualtower_ft": {
+      "inner_cv_auroc": 0.7652582159624414,
+      "best_params": {
+        "trans_d_model": 256,
+        "trans_nhead": 2,
+        "trans_num_layers": 2,
+        "dropout": 0.1590703596823514,
+        "fusion_hidden_dim": 64,
+        "lr": 0.0007040194175916817,
+        "weight_decay": 0.0005211436856526906,
+        "batch_size": 64,
+        "class_weight": "balanced"
+      },
+      "fold_auroc": [
+        0.7708559046587216,
+        0.7854821235102925,
+        0.7394366197183098
+      ],
+      "refit_epochs": 3,
+      "trials": 40,
+      "minutes": 11.6
+    }
+  },
+  "bootstrap": {
+    "test:dualtower_ft_vs_apache_iv": {
+      "auroc_diff": 0.11654135338345861,
+      "ci_lower": -0.043233082706766846,
+      "ci_upper": 0.28952067669172904,
+      "p_value": 0.169,
+      "n": 52
+    }
+  }
+}

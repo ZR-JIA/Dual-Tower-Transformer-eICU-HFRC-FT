@@ -85,25 +85,31 @@ minutes on an NVIDIA RTX 4060 Laptop GPU.
 ### Results
 
 Mean AUROC over the five splits after equal tuning (from
-`results/hfcs_tuned40v2_20261112/`):
+`results/hfcs_tuned40v3_20261114/`):
 
 | Model | Internal (eICU test) | External (MIMIC-IV) | External ECE |
 |---|---|---|---|
-| DualTower-FT (adapted) | 0.661 | 0.668 | 0.183 |
-| DT-Transformer | 0.662 | 0.671 | 0.148 |
-| XGBoost | 0.647 | 0.685 | 0.090 |
-| Random forest | 0.670 | 0.683 | 0.054 |
-| Logistic regression | 0.645 | 0.695 | 0.178 |
-| APACHE IV | 0.661 | not available | |
+| DualTower-FT (adapted) | 0.617 | 0.660 | 0.204 |
+| DT-Transformer | 0.653 | 0.661 | 0.161 |
+| XGBoost | 0.636 | 0.681 | 0.087 |
+| Random forest | 0.661 | 0.678 | 0.029 |
+| Logistic regression | 0.655 | 0.697 | 0.184 |
+| APACHE IV (test patients with a score) | 0.661 | not available | |
 
-DualTower-FT matched APACHE IV internally but did not outperform the classical
-models externally, and no ablated component had a consistent effect.
+DualTower-FT did not outperform the classical models. Its single-run results
+varied strongly with the training seed (`seed_check_summary.csv`: SD 0.03 across
+seeds of the same split; up to 0.660 instead of 0.485 on one split), and averaging
+five seeds raised it to 0.649 internally and 0.679 externally. In the ablation
+study, removing the hospital input raised its external AUROC to 0.690
+(significant in three of five splits); the other components had no consistent
+effect.
 
 | Folder in `results/` | Content |
 |---|---|
-| `hfcs_tuned40v2_20261112/` | Main results reported in the paper; ablations in `abl_*/` |
-| `hfcs_tuned40_20261112/` | First tuned run, superseded: early stopping used the scored inner fold |
-| `hfcs_final_run_20261112_152201/` | Preliminary run with untuned baselines |
+| `hfcs_tuned40v3_20261114/` | Main results reported in the paper: preprocessing fitted inside every inner fold, single-patient hospitals pooled into the unknown code; ablations in `abl_*/`, training-seed check in `seed_check_*.csv` |
+| `hfcs_tuned40v2_20261112/` | Superseded: preprocessing was fitted once per outer split, so scored inner folds shared statistics with the training folds |
+| `hfcs_tuned40_20261112/` | Superseded: early stopping used the scored inner fold |
+| `hfcs_final_run_20261112_152201/` | Preliminary run with published configurations and untuned baselines |
 
 ---
 
