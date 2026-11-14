@@ -29,14 +29,19 @@ same model of the full run on the same patients (paired bootstrap).
 DualTower-FT is compared with every other score by a paired, class-stratified
 bootstrap of the AUROC difference (2,000 resamples).
 
-The packs are already imputed and standardised with the outer training split
-(preprocessing/eICU, branch hfcs), and categorical codes are fixed, so no
-preprocessing is refitted inside the inner folds; that preprocessing is
-label-free.
+Preprocessing (category codes, median imputation, standardisation) is fitted
+fold by fold (hfcs_preprocessing.py): each inner fold fits it on its training
+folds only and applies it unchanged to the scored fold, and the refit fits it
+again on the whole development set before the test set and MIMIC-IV are
+transformed. Hospitals seen only once in the fitting patients share the unknown
+hospital code, so that code is trained before it is applied to MIMIC-IV. The packs give only the split membership and the column layout;
+the values come from the cleaned cohorts (--raw-eicu, --raw-mimic).
 
 Usage (from src/train), one process per split so splits can run in parallel:
     python run_hfcs_tuned.py --packs .../PACKS/patient_stratified \
-        --external .../MIMIC/data/hfcs/external --out ../../outputs/hfcs_tuned \
+        --raw-eicu .../eICU/outputs/hfcs/obs_cleaned.csv \
+        --raw-mimic .../MIMIC/data/hfcs/mimic_hfcs_cleaned.csv \
+        --out ../../outputs/hfcs_tuned \
         --run-name tuned --splits seed_42 [--variant no_site --models dualtower_ft]
     python run_hfcs_tuned.py --summarise ../../outputs/hfcs_tuned/tuned
     python run_hfcs_tuned.py --compare ../../outputs/hfcs_tuned/tuned \
@@ -64,7 +69,8 @@ from xgboost import XGBClassifier
 
 from architectures.model_factory import build_model
 from engine.trainers import NeuralTrainer
-from run_hfcs_experiments import CAT_COLS, arrays, evaluate, load_split, loader
+from hfcs_preprocessing import FoldPreprocessor, load_raw_split
+from run_hfcs_experiments import CAT_COLS, arrays, evaluate, loader
 from utils.config_manager import ConfigManager
 from utils.seed import set_all_seeds
 from utils.statistical_tests import paired_bootstrap_auroc
@@ -277,16 +283,29 @@ def early_stopping_split(tr, seed):
     return tr.iloc[i_fit], tr.iloc[i_es]
 
 
-def tune(name, dev, cm, features, frames, seed, device, n_trials, variant="full"):
-    folds = list(StratifiedKFold(INNER_FOLDS, shuffle=True, random_state=seed)
-                 .split(dev, dev["mortality"]))
+# Hospitals seen in fewer fitting patients than this are coded as unknown, so the
+# unknown code (all MIMIC-IV patients, unseen eICU hospitals) is learned from real
+# patients; see hfcs_preprocessing.py. Applied identically to every learner.
+SITE_MIN_COUNT = {"site_id": 2}
 
+
+def inner_folds(dev_raw, features, seed):
+    """Stratified inner folds, each preprocessed with its own training folds only."""
+    folds = []
+    for i_tr, i_va in StratifiedKFold(INNER_FOLDS, shuffle=True, random_state=seed).split(
+            dev_raw, dev_raw["mortality"]):
+        prep = FoldPreprocessor(features, SITE_MIN_COUNT).fit(dev_raw.iloc[i_tr])
+        folds.append((prep.transform(dev_raw.iloc[i_tr]), prep.transform(dev_raw.iloc[i_va])))
+    return folds
+
+
+def tune(name, folds, cm, features, seed, device, n_trials, variant="full"):
     def objective(trial):
         params = SPACES[name](trial)
         aucs, epochs = [], []
-        for k, (i_tr, i_va) in enumerate(folds):
-            tr, va = dev.iloc[i_tr], dev.iloc[i_va]
-            learner = Learner(name, params, cm, features, frames, seed, device, variant)
+        for k, (tr, va) in enumerate(folds):
+            learner = Learner(name, params, cm, features, {"train": tr, "val": va},
+                              seed, device, variant)
             if name in NEURAL:
                 # the scored fold `va` is never seen during training
                 fit, es = early_stopping_split(tr, seed + k)
@@ -307,17 +326,22 @@ def tune(name, dev, cm, features, frames, seed, device, n_trials, variant="full"
     return study
 
 
-def run_split(pack, external_root, out_root, models, n_trials, device, variant="full"):
+def run_split(pack, raw_eicu, raw_mimic, out_root, models, n_trials, device, variant="full"):
     seed = int(pack.name.split("_")[1])
     cm = ConfigManager()
-    frames, features, apache = load_split(pack, external_root)
+    raw, layout, apache = load_raw_split(pack, raw_eicu, raw_mimic)
     drop = VARIANTS[variant].get("drop", [])
-    missing = [c for c in drop if c not in features]
+    missing = [c for c in drop if c not in layout]
     if missing:
         raise RuntimeError(f"variant {variant}: columns not found {missing}")
-    features = [c for c in features if c not in drop]
-    dev = pd.concat([frames["train"], frames["val"]], ignore_index=True)
-    sets = [s for s in ("test", "external") if s in frames]
+    features = [c for c in layout if c not in drop]
+    dev_raw = pd.concat([raw["train"], raw["val"]], ignore_index=True)
+    folds = inner_folds(dev_raw, layout, seed)
+    # the refit, the test set and MIMIC-IV use preprocessing fitted on all 291
+    prep = FoldPreprocessor(layout, SITE_MIN_COUNT).fit(dev_raw)
+    dev = prep.transform(dev_raw)
+    sets = [s for s in ("test", "external") if s in raw]
+    frames = {"dev": dev} | {s: prep.transform(raw[s]) for s in sets}
     preds = {s: pd.DataFrame({"patient_id": frames[s]["patient_id"],
                               "mortality": frames[s]["mortality"]}) for s in sets}
     results, tuning = {}, {}
@@ -326,7 +350,7 @@ def run_split(pack, external_root, out_root, models, n_trials, device, variant="
 
     for name in models:
         t0 = time.time()
-        study = tune(name, dev, cm, features, frames, seed, device, n_trials, variant)
+        study = tune(name, folds, cm, features, seed, device, n_trials, variant)
         best = study.best_trial
         params = SPACES[name](optuna.trial.FixedTrial(best.params))
         epochs = int(np.median(best.user_attrs["best_epochs"])) if name in NEURAL else None
@@ -436,8 +460,9 @@ def compare(full_dir, variant_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--packs")
-    ap.add_argument("--external", default=None)
+    ap.add_argument("--packs", help="PACKS/<protocol>: split membership and column layout")
+    ap.add_argument("--raw-eicu", help="cleaned eICU cohort (obs_cleaned.csv)")
+    ap.add_argument("--raw-mimic", default=None, help="cleaned MIMIC-IV cohort")
     ap.add_argument("--out", default="../../outputs/hfcs_tuned")
     ap.add_argument("--run-name", default=time.strftime("run_%Y%m%d_%H%M%S"))
     ap.add_argument("--models", default=",".join(MODELS))
@@ -465,9 +490,10 @@ def main():
     with open(out_root / f"run_config_{'_'.join(p.name for p in packs)}.json", "w") as f:
         json.dump(vars(args) | {"models": models, "torch": torch.__version__,
                                 "optuna": optuna.__version__}, f, indent=2)
-    external_root = Path(args.external) if args.external else None
+    raw_mimic = Path(args.raw_mimic) if args.raw_mimic else None
     for pack in packs:
-        run_split(pack, external_root, out_root, models, args.trials, device, args.variant)
+        run_split(pack, Path(args.raw_eicu), raw_mimic, out_root, models, args.trials, device,
+                  args.variant)
 
 
 if __name__ == "__main__":

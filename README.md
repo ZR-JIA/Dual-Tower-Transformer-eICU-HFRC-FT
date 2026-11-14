@@ -39,34 +39,41 @@ are not included.
 | File | Purpose |
 |---|---|
 | `src/train/run_hfcs_tuned.py` | Main experiment: five splits, equal-budget Optuna tuning (TPE, 40 trials, stratified 3-fold inner cross-validation) for DualTower-FT, DT-Transformer, XGBoost, random forest and logistic regression; refit on the development set; evaluation on the eICU test set and MIMIC-IV; paired bootstrap tests; ablations (`--variant`) |
+| `src/train/hfcs_preprocessing.py` | Fold-wise preprocessing: category codes (single-patient hospitals pooled into the unknown code), median imputation and standardisation fitted on the fitting patients only |
 | `src/train/analyze_hfcs_tuned.py` | Aggregate analyses: APACHE IV comparison on the same patients, tuning optimism, selected hyperparameters, external AUROC with a patient-bootstrap 95% CI, calibration intercept and slope, ROC and calibration figure |
 | `src/train/run_hfcs_experiments.py` | Preliminary comparison with published configurations (no tuning) |
 | `src/train/architectures/models/dualtower_ft.py` | `pooling` option (`cls` or `mean`) for the ablation |
 | `src/train/utils/statistical_tests.py` | Paired class-stratified bootstrap; corrected DeLong test |
 | `src/train/engine/trainers.py` | XGBoost early stopping fixed for XGBoost 2.0 or later |
-| `src/train/tests/` | Tests for the DeLong test, the ablation variants and the calibration measures |
+| `src/train/tests/` | Tests for the DeLong test, the ablation variants, the calibration measures and the fold-wise preprocessing |
 
 ### Reproducing the results
 
 Run from `src/train`, one process per split (`seed_42`, `seed_5191`, `seed_5390`,
-`seed_7270`, `seed_860`) so that splits can run in parallel. `PACKS` and
-`EXTERNAL` are the outputs of the two preprocessing repositories.
+`seed_7270`, `seed_860`) so that splits can run in parallel. `PACKS` gives the
+split membership and column layout; `RAW_EICU` and `RAW_MIMIC` are the cleaned
+cohorts before imputation and scaling, from the two preprocessing repositories.
+Preprocessing (category codes, median imputation, standardisation) is fitted
+inside every inner cross-validation fold on its training folds only, and again on
+the whole development set for the refit; hospitals seen only once share the
+unknown hospital code.
 
 ```bash
 PACKS=.../Data-Preprocessing-for-eICU/train_ready_hfcs/PACKS/patient_stratified
-EXTERNAL=.../Data-Preprocessing-for-MIMIC/data/hfcs/external
-OUT=../../outputs/hfcs_tuned
+RAW_EICU=.../Data-Preprocessing-for-eICU/outputs/hfcs/obs_cleaned.csv
+RAW_MIMIC=.../Data-Preprocessing-for-MIMIC/data/hfcs/mimic_hfcs_cleaned.csv
+OUT=../../outputs/hfcs_tuned_v3
 
 # Main comparison, all five learners
-python run_hfcs_tuned.py --packs $PACKS --external $EXTERNAL --out $OUT \
-    --run-name tuned40v2 --splits seed_42 --trials 40
-python run_hfcs_tuned.py --summarise $OUT/tuned40v2
-python analyze_hfcs_tuned.py $OUT/tuned40v2
+python run_hfcs_tuned.py --packs $PACKS --raw-eicu $RAW_EICU --raw-mimic $RAW_MIMIC \
+    --out $OUT --run-name tuned40v3 --splits seed_42 --trials 40
+python run_hfcs_tuned.py --summarise $OUT/tuned40v3
+python analyze_hfcs_tuned.py $OUT/tuned40v3
 
 # Ablation, for example without the hospital input, then the paired comparison
-python run_hfcs_tuned.py --packs $PACKS --external $EXTERNAL --out $OUT \
-    --run-name abl_no_site --variant no_site --models dualtower_ft --splits seed_42
-python run_hfcs_tuned.py --compare $OUT/tuned40v2 $OUT/abl_no_site
+python run_hfcs_tuned.py --packs $PACKS --raw-eicu $RAW_EICU --raw-mimic $RAW_MIMIC \
+    --out $OUT --run-name abl_no_site --variant no_site --models dualtower_ft --splits seed_42
+python run_hfcs_tuned.py --compare $OUT/tuned40v3 $OUT/abl_no_site
 ```
 
 Ablation variants: `mean_pool` (mean pooling instead of the [CLS] token),
