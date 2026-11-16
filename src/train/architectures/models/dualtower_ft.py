@@ -1,20 +1,22 @@
 """
-DualTower with FT-Transformer Right Tower (DT-FT)
+DualTower with an FT-Transformer right tower (DualTower-FT)
 
 Architecture:
-    Left Tower:  Categorical embeddings (Age, Gender, Ethnicity) — identical to DualTower
-    Right Tower: FTRightTower
+    Left tower:  one embedding per categorical feature (in the HF-CS study:
+                 sex, ethnicity and hospital), as in DualTower
+    Right tower: FTRightTower
                    NumericalFeatureTokenizer
-                   → prepend learnable [CLS] token
-                   → TransformerEncoder (FFN dim = 4 × d_model, following FT-Transformer)
-                   → [CLS] output as aggregated representation
-    Fusion:      Concatenation + MLP classification head — identical to DualTower
+                   -> prepend a learnable [CLS] token
+                   -> TransformerEncoder (feed-forward width 4 x d_model, as in
+                      FT-Transformer)
+                   -> [CLS] output as the summary of the numerical features
+    Fusion:      concatenation of both towers and an MLP head, as in DualTower
 
-Key difference from dualtower.py:
-    - Right tower uses a learnable [CLS] token for aggregation instead of mean pooling.
-    - [CLS] attends over ALL numerical feature tokens, learning to route globally
-      relevant information rather than averaging all tokens equally.
-    - FFN expansion ratio is 4× (FT-Transformer default) vs 2× in the original.
+Differences from dualtower.py:
+    - The right tower aggregates with a learnable [CLS] token instead of mean
+      pooling, so the [CLS] token attends over all numerical feature tokens.
+    - The feed-forward width is 4 x d_model (FT-Transformer default) instead
+      of 2 x d_model.
 
 Reference:
     Gorishniy et al. (2021). Revisiting Deep Learning Models for Tabular Data.
@@ -42,10 +44,10 @@ class FTRightTower(nn.Module):
 
     Pipeline:
         x [B, N]
-        → NumericalFeatureTokenizer → tokens [B, N, d_model]
-        → prepend cls_token         → tokens [B, N+1, d_model]
-        → TransformerEncoder        → tokens [B, N+1, d_model]
-        → tokens[:, 0, :]           → cls_out [B, d_model]
+        -> NumericalFeatureTokenizer -> tokens [B, N, d_model]
+        -> prepend cls_token         -> tokens [B, N+1, d_model]
+        -> TransformerEncoder        -> tokens [B, N+1, d_model]
+        -> tokens[:, 0, :]           -> cls_out [B, d_model]
 
     pooling="mean" is an ablation switch: no [CLS] token is prepended and the
     encoder outputs are averaged; everything else stays the same.
@@ -68,13 +70,13 @@ class FTRightTower(nn.Module):
         self.pooling = pooling
         self.tokenizer = NumericalFeatureTokenizer(input_dim, d_model)
 
-        # Learnable [CLS] token — initialized to zero, learned during training
+        # Learnable [CLS] token, initialised to zero and learned in training
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
-            dim_feedforward=d_model * 4,   # FT-Transformer convention (4× vs 2×)
+            dim_feedforward=d_model * 4,   # FT-Transformer convention (4x, not 2x)
             dropout=dropout,
             batch_first=True,
             norm_first=True                # Pre-LN for training stability
@@ -110,9 +112,9 @@ class DualTowerFT(nn.Module):
     """
     DualTower with FT-Transformer Right Tower (DT-FT).
 
-    Left Tower:  Learnable embeddings for categorical demographics — unchanged.
-    Right Tower: FTRightTower — [CLS] token aggregation instead of mean pooling.
-    Fusion:      Concatenation → MLP → logit — unchanged.
+    Left tower:  learnable embeddings for the categorical features (unchanged).
+    Right tower: FTRightTower, [CLS] token aggregation instead of mean pooling.
+    Fusion:      concatenation, MLP, one logit (unchanged).
 
     Config key: model: dualtower_ft
     """
@@ -130,7 +132,7 @@ class DualTowerFT(nn.Module):
         if not arch:
             arch = config.get('model_config', {}).get('architecture', {})
 
-        # === Left Tower: Categorical Embeddings (identical to DualTower) ===
+        # Left tower: categorical embeddings (same as DualTower)
         self.cat_features_config = arch['cat_features']
 
         if 'num_indices' in arch:
@@ -151,7 +153,7 @@ class DualTowerFT(nn.Module):
             self.cat_indices.append(feat['index'])
             total_emb_dim += feat['emb_dim']
 
-        # === Right Tower: FT-Transformer (CLS token) ===
+        # Right tower: FT-Transformer with a [CLS] token
         d_model = arch['trans_d_model']
         num_feat_count = len(self.num_indices)
 
@@ -165,7 +167,7 @@ class DualTowerFT(nn.Module):
         )
         right_output_dim = d_model
 
-        # === Fusion Layer (identical to DualTower) ===
+        # Fusion layer (same as DualTower)
         fusion_in = total_emb_dim + right_output_dim
         fusion_hidden = arch['fusion_hidden_dim']
 
@@ -177,41 +179,37 @@ class DualTowerFT(nn.Module):
             nn.Linear(fusion_hidden, 1)
         )
 
-        # ─── Adaptive Runtime Safeguard toggle ────────────────────────────
-        # Default True: NaN guard + categorical clamp + numerical clamp are
-        # applied in _compute_towers. Set to False at inference time to
-        # bypass the inference-time safeguards (used by the stress-test
-        # harness in run_safeguard_stress_test.py). See paper §3.1.2.
+        # Runtime safeguard switch. When True (default), _compute_towers
+        # replaces non-finite values, clamps categorical codes to their
+        # vocabulary and clamps numerical values to +/-10. The ablation without
+        # the safeguard and run_safeguard_stress_test.py set it to False.
         self.safeguard_enabled: bool = True
 
         n_params = sum(p.numel() for p in self.parameters())
         logger.info(
             f"DualTowerFT: Initialized with FT-Transformer Right Tower "
-            f"(CLS aggregation, FFN 4×) | {n_params:,} parameters | "
+            f"(CLS aggregation, FFN 4x) | {n_params:,} parameters | "
             f"safeguard_enabled={self.safeguard_enabled}"
         )
 
     def _compute_towers(self, x: torch.Tensor):
         """
-        Compute left and right tower outputs (shared logic).
+        Compute the left and right tower outputs.
 
-        Includes the inference-time portion of the Adaptive Runtime Safeguard
-        (three stages: NaN/Inf guard, categorical clamp, numerical clamp).
-        The safeguard can be toggled via ``self.safeguard_enabled`` (default
-        True). Toggling is used by the stress-test harness in
-        ``run_safeguard_stress_test.py``; production callers should leave it
-        enabled. See paper §3.1.2.
+        Applies the runtime safeguard in three stages (non-finite guard,
+        categorical clamp, numerical clamp) while ``self.safeguard_enabled``
+        is True, which is the default. Only the ablation and the stress test
+        switch it off.
         """
         safeguard = getattr(self, 'safeguard_enabled', True)
 
-        # ─── Stage A: NaN / Inf guard ──────────────────────────────────────
-        # Replace NaN / ±Inf with 0 (post-scaling neutral). On clean inputs
-        # this is a no-op; on downstream NaN that bypassed preprocessing this
-        # prevents propagation through the network.
+        # Stage A: replace NaN and +/-Inf with 0, the training mean after
+        # scaling. On clean inputs nothing changes; otherwise a missed NaN
+        # cannot spread through the network.
         if safeguard:
             x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # ─── Left Tower (categorical) ──────────────────────────────────────
+        # Left tower (categorical)
         emb_outs = []
         for idx, emb, feat in zip(
             self.cat_indices, self.embeddings, self.cat_features_config
@@ -222,19 +220,18 @@ class DualTowerFT(nn.Module):
                     x[:, idx], min=0, max=feat['num_classes'] - 1
                 ).long()
             else:
-                # Bypass: direct cast. Raises IndexError if the index is
-                # outside the embedding's vocabulary (e.g., age = 200).
+                # Without the safeguard: direct cast. Raises IndexError if a
+                # code is outside the embedding's vocabulary.
                 col_input = x[:, idx].long()
             emb_outs.append(emb(col_input))
         left_out = torch.cat(emb_outs, dim=1)                # [B, total_emb_dim]
 
-        # ─── Right Tower (numerical, CLS aggregation) ──────────────────────
+        # Right tower (numerical, [CLS] aggregation)
         num_data = x[:, self.num_indices]
         if safeguard:
-            # Stage C: numerical clamp to ±10 in post-scaling z-score units.
-            # Legitimate physiological values after StandardScaler are well
-            # inside ±5; ±10 leaves a safe margin while bounding pathological
-            # device errors and unit mistakes.
+            # Stage C: clamp numerical values to +/-10 standard deviations
+            # after scaling. Plausible values lie well inside +/-5, so the
+            # clamp only bounds device errors and unit mistakes.
             num_data = torch.clamp(num_data, min=-10.0, max=10.0)
         right_out = self.right_tower(num_data)               # [B, d_model]
 
